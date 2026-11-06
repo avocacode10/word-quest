@@ -456,17 +456,22 @@ const cv=document.getElementById("fx"),cx=cv.getContext("2d");let parts=[],raf=0
 const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
 function confetti(n=90){
   if(reduce)return;
-  cv.width=innerWidth*devicePixelRatio;cv.height=innerHeight*devicePixelRatio;
+  fitFx();
   const cols=["#5B3FE0","#F2A20C","#139A5E","#D93A45","#38A3F5","#FF7AC6"];
   for(let i=0;i<n;i++)parts.push({x:innerWidth/2,y:innerHeight*.4,vx:(Math.random()-.5)*14,vy:-Math.random()*13-4,r:Math.random()*6+4,c:cols[i%cols.length],a:Math.random()*6,va:(Math.random()-.5)*.4,life:0});
   if(!raf)loop();
 }
+// keep the canvas the size of the screen (keyboard, address bar and rotation change it mid-animation); resizing also wipes it
+function fitFx(){const w=Math.round(innerWidth*devicePixelRatio),h=Math.round(innerHeight*devicePixelRatio);
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h}}
 function loop(){
-  cx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);cx.clearRect(0,0,innerWidth,innerHeight);
+  fitFx();cx.setTransform(1,0,0,1,0,0);cx.clearRect(0,0,cv.width,cv.height);
+  cx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
   parts.forEach(p=>{p.vy+=.35;p.vx*=.99;p.x+=p.vx;p.y+=p.vy;p.a+=p.va;p.life++;
     cx.save();cx.translate(p.x,p.y);cx.rotate(p.a);cx.fillStyle=p.c;cx.fillRect(-p.r/2,-p.r/4,p.r,p.r/2);cx.restore()});
   parts=parts.filter(p=>p.y<innerHeight+30&&p.life<220);
-  raf=parts.length?requestAnimationFrame(loop):(cx.clearRect(0,0,innerWidth,innerHeight),0);
+  if(parts.length){raf=requestAnimationFrame(loop);return}
+  raf=0;cx.setTransform(1,0,0,1,0,0);cx.clearRect(0,0,cv.width,cv.height);
 }
 function banner(t){const b=document.createElement("div");b.className="banner";b.innerHTML=`<span>${t}</span>`;document.body.appendChild(b);setTimeout(()=>b.remove(),1700)}
 
