@@ -98,6 +98,8 @@ canvas#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-in
 .list{display:flex;flex-direction:column}
 .row{display:flex;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line);align-items:center}
 .row:last-child{border-bottom:0}
+.lbrow{justify-content:flex-start}.lbrow.me{background:var(--accent-soft);border-radius:12px;padding-inline:8px}
+.lbn{width:28px;text-align:center;font:600 1.1rem var(--display);color:var(--muted)}.lbs{font-weight:700;white-space:nowrap}
 .row .en{font-size:1.15rem;font-weight:500}
 .dots{display:flex;gap:3px;direction:ltr}
 .dots i{width:8px;height:8px;border-radius:50%;background:var(--line)}
@@ -346,7 +348,7 @@ const GAP=[1,1,2,4,8], RETIRE_GAP=15, NEW_PER_ROUND=3, NEW_MAX=5, LEARN_BRAKE=8;
 const MODES={mix:["מעורב","הכל ביחד · מומלץ"],e2h:["מה הפירוש?","מאנגלית לעברית"],h2e:["איך אומרים?","מעברית לאנגלית"],heType:["הקלדה בעברית","לכתוב את הפירוש"],spell:["איות","לכתוב באנגלית"],ear:["שמיעה","לשמוע ולבחור"]};
 const AVATARS=["🦊","🐼","🐯","🦄","🐸","🐙","🦁","🐨","🐰","🐧","🐵","🦉","🐶","🐱","🐢","🐬"];
 
-/* ---------- storage (this browser only; nothing goes to a server) ---------- */
+/* ---------- storage (this browser; only the opt-in class leaderboard below goes online) ---------- */
 const store={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},
   set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
 let P=store.get("ow-profiles",null);            // {list:[{id,name,av,g}], cur}
@@ -369,6 +371,22 @@ if(!P){
 }
 const saveP=()=>store.set("ow-profiles",P);
 const me=()=>P.list.find(p=>p.id===P.cur)||null;
+
+/* ---------- class leaderboard (Supabase; setup in supabase/leaderboard.sql) ----------
+   Only players who opt in are sent: their name, avatar and total score. Nothing else leaves the device. */
+const LB={url:"",key:""};   // fill in: project URL (https://xxxx.supabase.co) and publishable/anon key
+const LB_ON=!!(LB.url&&LB.key);
+const LB_NAME=/^[א-תA-Za-z0-9 .'״׳-]{1,14}$/;
+function lbCall(fn,args){
+  const h={apikey:LB.key,"Content-Type":"application/json"};
+  if(LB.key.startsWith("eyJ"))h.Authorization="Bearer "+LB.key;   // legacy anon JWT key
+  return fetch(LB.url.replace(/\/$/,"")+"/rest/v1/rpc/"+fn,{method:"POST",headers:h,body:JSON.stringify(args||{})})
+    .then(r=>r.ok?r.text().then(t=>t?JSON.parse(t):null):Promise.reject(new Error(r.status)));
+}
+const lbToken=()=>{const a=new Uint8Array(16);crypto.getRandomValues(a);return [...a].map(b=>b.toString(16).padStart(2,"0")).join("")};
+// push this player's score (only if they joined the board); failures are ignored, next round retries
+function lbPush(p,score){if(!LB_ON||!p||!p.lb)return Promise.resolve();
+  return lbCall("lb_submit",{p_token:p.lb,p_name:p.name.trim(),p_av:p.av,p_score:score|0}).catch(()=>{})}
 let S=null, L=null, LP=null, WORDS=[], BY_EN={}, CATS=[];
 function loadUser(id){P.cur=id;saveP();S=Object.assign(freshUser(),store.get(uKey(id),{}));if(!MODES[S.mode])S.mode="mix";setLevel(S.level)}
 function setLevel(id){
@@ -438,17 +456,22 @@ const cv=document.getElementById("fx"),cx=cv.getContext("2d");let parts=[],raf=0
 const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
 function confetti(n=90){
   if(reduce)return;
-  cv.width=innerWidth*devicePixelRatio;cv.height=innerHeight*devicePixelRatio;
+  fitFx();
   const cols=["#5B3FE0","#F2A20C","#139A5E","#D93A45","#38A3F5","#FF7AC6"];
   for(let i=0;i<n;i++)parts.push({x:innerWidth/2,y:innerHeight*.4,vx:(Math.random()-.5)*14,vy:-Math.random()*13-4,r:Math.random()*6+4,c:cols[i%cols.length],a:Math.random()*6,va:(Math.random()-.5)*.4,life:0});
   if(!raf)loop();
 }
+// keep the canvas the size of the screen (keyboard, address bar and rotation change it mid-animation); resizing also wipes it
+function fitFx(){const w=Math.round(innerWidth*devicePixelRatio),h=Math.round(innerHeight*devicePixelRatio);
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h}}
 function loop(){
-  cx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);cx.clearRect(0,0,innerWidth,innerHeight);
+  fitFx();cx.setTransform(1,0,0,1,0,0);cx.clearRect(0,0,cv.width,cv.height);
+  cx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
   parts.forEach(p=>{p.vy+=.35;p.vx*=.99;p.x+=p.vx;p.y+=p.vy;p.a+=p.va;p.life++;
     cx.save();cx.translate(p.x,p.y);cx.rotate(p.a);cx.fillStyle=p.c;cx.fillRect(-p.r/2,-p.r/4,p.r,p.r/2);cx.restore()});
   parts=parts.filter(p=>p.y<innerHeight+30&&p.life<220);
-  raf=parts.length?requestAnimationFrame(loop):(cx.clearRect(0,0,innerWidth,innerHeight),0);
+  if(parts.length){raf=requestAnimationFrame(loop);return}
+  raf=0;cx.setTransform(1,0,0,1,0,0);cx.clearRect(0,0,cv.width,cv.height);
 }
 function banner(t){const b=document.createElement("div");b.className="banner";b.innerHTML=`<span>${t}</span>`;document.body.appendChild(b);setTimeout(()=>b.remove(),1700)}
 
@@ -613,6 +636,7 @@ function home(){
   </section>
   <button class="btn go" id="go">יאללה, מתחילים!</button>
   <button class="btn ghost withic" id="list">${LIST_IC}כל המילים ב${esc(L.name)}</button>
+  ${LB_ON?`<button class="btn ghost withic" id="lbb"><span aria-hidden="true">🏆</span>טבלת הכיתה</button>`:""}
   <ul class="tips">
     <li><span>🔈</span>לחיצה שנייה על הרמקול משמיעה לאט 🐢</li>
     <li><span>🔁</span>מילים שטועים בהן חוזרות מהר</li>
@@ -625,6 +649,7 @@ function home(){
     if(LP.cats.includes(c)){if(LP.cats.length>1)LP.cats=LP.cats.filter(x=>x!==c)}else LP.cats.push(c);save();
     app.querySelectorAll("[data-cat]").forEach(x=>x.setAttribute("aria-pressed",LP.cats.includes(x.dataset.cat)))});
   $("#go").onclick=()=>{ctx();start()};$("#list").onclick=listView;
+  const lbb=$("#lbb");if(lbb)lbb.onclick=()=>board();
   $("#who").onclick=()=>profiles();
   $("#snd").onclick=()=>{S.sound=!S.sound;save();home()};
 }
@@ -653,7 +678,7 @@ function profiles(manage){
       <div class="actions"><button class="btn danger" id="y">כן, למחוק</button><button class="btn ghost" id="n">ביטול</button></div></div>`;
     $("#cf").scrollIntoView({block:"nearest"});
     $("#n").onclick=()=>$("#cf").innerHTML="";
-    $("#y").onclick=()=>{store.del(uKey(p.id));P.list=P.list.filter(x=>x.id!==p.id);if(P.cur===p.id){P.cur=null;S=null}saveP();profiles(true)}});
+    $("#y").onclick=()=>{if(LB_ON&&p.lb)lbCall("lb_leave",{p_token:p.lb}).catch(()=>{});store.del(uKey(p.id));P.list=P.list.filter(x=>x.id!==p.id);if(P.cur===p.id){P.cur=null;S=null}saveP();profiles(true)}});
   $("#mg").onclick=()=>profiles(!manage);
   $("#add").onclick=()=>editProfile(null);
   const bk=$("#bk");if(bk)bk.onclick=()=>{loadUser(P.cur);home()};
@@ -687,7 +712,7 @@ function editProfile(id,first){
   const cn=$("#cn");if(cn)cn.onclick=()=>profiles();
   $("#pf").onsubmit=e=>{e.preventDefault();const name=nm.value.trim();
     if(!name){$("#er").hidden=false;nm.focus();return}
-    if(p){Object.assign(p,{name,av,g:gen});saveP();if(P.cur===p.id&&S)home();else profiles()}
+    if(p){Object.assign(p,{name,av,g:gen});saveP();if(p.lb)lbPush(p,store.get(uKey(p.id),freshUser()).score);if(P.cur===p.id&&S)home();else profiles()}
     else{const nid=newId();P.list.push({id:nid,name,av,g:gen});store.set(uKey(nid),freshUser());loadUser(nid);
       tone([523,659,784],.12,"triangle",.09);home()}};
 }
@@ -829,6 +854,7 @@ function summary(){
   const m=WORDS.filter(w=>mastered(w.id)).length;
   const msg=pct===100?"מושלם! 🏆":pct>=80?"עבודה מצוינת! 🌟":pct>=60?"יפה מאוד! ממשיכים 💪":"מתאמנים ומשתפרים 🌱";
   if(pct>=80){sFan();confetti(140)}
+  lbPush(me(),S.score);
   const miss=[...G.missed].map(id=>WORDS[id]);
   app.innerHTML=`
   <section class="panel center">
@@ -841,6 +867,37 @@ function summary(){
   <div class="actions"><button class="btn" id="again">עוד סיבוב ▶</button><button class="btn ghost" id="hm">לתפריט</button></div>`;
   app.querySelectorAll("[data-say]").forEach(b=>b.onclick=()=>sayWord(WORDS[+b.dataset.say],b));
   $("#again").onclick=start;$("#hm").onclick=home;
+}
+
+function board(){
+  const u=me();
+  app.innerHTML=`<div class="toprow"><h1>טבלת הכיתה 🏆</h1><button class="iconbtn tac" id="bk">→ חזרה</button></div>
+  <div id="lbj"></div>
+  <section class="panel"><div class="list" id="lbl"><p class="sub center">טוען…</p></div></section>`;
+  $("#bk").onclick=home;
+  const join=$("#lbj");
+  if(!u.lb){
+    const ok=LB_NAME.test(u.name.trim());
+    join.innerHTML=`<section class="panel center"><b>רוצה להופיע בטבלה?</b>
+      <p class="sub">בטבלה יופיעו רק השם, הדמות והנקודות: <span class="av" style="--k:${avColor(u.av)};display:inline-grid;vertical-align:middle">${u.av}</span> ${esc(u.name)} · ⭐ ${S.score}</p>
+      ${ok?`<button class="btn" id="jn">כן, ${g("תוסיפי","תוסיף")} אותי</button>`
+          :`<p class="err" style="margin:0">אפשר להצטרף רק עם שם קצר באותיות ובמספרים. ${g("שני","שנה")} את השם במסך השחקנים.</p>`}
+      <div class="err" id="jer" hidden></div></section>`;
+    const jn=$("#jn");if(jn)jn.onclick=()=>{jn.disabled=true;const t=lbToken();
+      lbCall("lb_submit",{p_token:t,p_name:u.name.trim(),p_av:u.av,p_score:S.score|0})
+        .then(()=>{u.lb=t;saveP();tone([523,659,784],.12,"triangle",.09);board()})
+        .catch(()=>{jn.disabled=false;const e=$("#jer");e.hidden=false;e.textContent="לא הצלחנו להצטרף. בדקו שיש אינטרנט ונסו שוב."})};
+  }
+  lbPush(u,S.score).then(()=>lbCall("lb_top")).then(rows=>{
+    const l=$("#lbl");if(!l)return;
+    if(!rows||!rows.length){l.innerHTML=`<p class="sub center">עוד אין אף אחד בטבלה. ${g("תהיי","תהיה")} ${g("הראשונה","הראשון")}!</p>`;return}
+    const medal=["🥇","🥈","🥉"];
+    l.innerHTML=rows.map((r,i)=>{const mine=u.lb&&r.name===u.name.trim()&&r.av===u.av;
+      return `<div class="row lbrow${mine?" me":""}"><span class="lbn">${medal[i]||i+1}</span><span class="av" style="--k:${avColor(r.av)}">${esc(r.av)}</span>
+        <b style="flex:1">${esc(r.name)}</b><span class="lbs">⭐ ${r.score}</span></div>`}).join("")
+      +(u.lb?`<button class="btn ghost" id="lv" style="margin-top:12px">להסתיר אותי מהטבלה</button>`:"");
+    const lv=$("#lv");if(lv)lv.onclick=()=>{lv.disabled=true;lbCall("lb_leave",{p_token:u.lb}).then(()=>{delete u.lb;saveP();board()}).catch(()=>{lv.disabled=false})};
+  }).catch(()=>{const l=$("#lbl");if(l)l.innerHTML=`<p class="sub center">אין חיבור לטבלה כרגע. נסו שוב מאוחר יותר.</p>`});
 }
 
 function listView(){
